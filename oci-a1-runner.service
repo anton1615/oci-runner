@@ -1,0 +1,18 @@
+[Unit]
+Description=OCI A1 capacity runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Environment=ENV_FILE=/home/ubuntu/oci-runner/etc/a1.env
+Environment=LOG_DIR=/home/ubuntu/oci-runner/log
+ExecStart=/home/ubuntu/oci-runner/bin/launch-a1.sh
+Restart=on-failure
+RestartSec=20
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

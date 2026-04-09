@@ -1,0 +1,6 @@
+a1.env
+log/
+*.log
+a1-success.json
+a1-success.txt
+tmp/
