@@ -18,10 +18,14 @@ runner on another machine.
   Sample `systemd` unit.
 - `a1.env.example`
   Sanitized configuration template.
+- `install.sh`
+  Minimal Linux installer for `systemd` deployments with root checks and service-user derivation.
 - `tests/launch-a1.test.sh`
   Shell regression test with mocked OCI and Discord behavior.
 - `tests/check-runner.test.sh`
   Shell regression test for helper-script path overrides and log display.
+- `tests/install.test.sh`
+  Shell regression test for installer path rendering and config preservation.
 - `docs/superpowers/specs/2026-04-09-oci-runner-repo-design.md`
   Design document for this extracted repository.
 
@@ -51,6 +55,23 @@ You need a Linux machine with:
 - `curl`
 - `systemd` if you want to run it as a service
 - OCI CLI installed and authenticated for the target profile
+
+## Quick start
+
+Default install:
+
+```bash
+sudo bash ./install.sh
+sudo editor /home/ubuntu/oci-runner/etc/a1.env
+sudo systemctl start oci-a1-runner.service
+```
+
+Quick validation after start:
+
+```bash
+bash ./check-runner.sh
+sudo systemctl status oci-a1-runner.service --no-pager
+```
 
 You also need OCI-side prerequisites:
 
@@ -149,6 +170,62 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now oci-a1-runner.service
 ```
 
+## Install with install.sh
+
+`install.sh` is a small Linux-only installer for hosts that already have the
+required runtime dependencies such as OCI CLI, `jq`, `curl`, and `systemd`.
+
+It must be run as `root`.
+
+Supported flags:
+
+- `--root <path>`
+- `--start`
+
+`--root` must be an absolute path.
+
+Default install:
+
+```bash
+sudo bash ./install.sh
+```
+
+Custom root:
+
+```bash
+sudo bash ./install.sh --root /srv/oci-runner
+```
+
+Install and start immediately:
+
+```bash
+sudo bash ./install.sh --start
+```
+
+What the installer does:
+
+- creates `<root>/bin`, `<root>/etc`, and `<root>/log`
+- installs `launch-a1.sh` and `check-runner.sh` into `<root>/bin`
+- creates `<root>/etc/a1.env` from `a1.env.example` only when the file is missing
+- derives the service user from `<root>` when it matches `/home/<user>/...`; otherwise it uses `SUDO_USER` only if that account exists
+- fails fast if it cannot derive a valid existing service user
+- renders `/etc/systemd/system/oci-a1-runner.service` so `User`, `ENV_FILE`, `LOG_DIR`, and `ExecStart` match the selected root
+- sets ownership and permissions so the service user can read a newly created `a1.env` and write logs under `<root>/log`
+- runs `systemctl daemon-reload` and `systemctl enable oci-a1-runner.service`
+- runs `systemctl start oci-a1-runner.service` only when `--start` is supplied
+
+Safety notes:
+
+- `install.sh` does not populate live OCI or Discord secrets.
+- If `<root>/etc/a1.env` already exists, the installer keeps it unchanged.
+- If `<root>/etc/a1.env` already exists, it must already be readable by the
+  derived service user or the installer will fail fast.
+- The installer fails fast unless it is run as `root`.
+- The installer fails fast if `--root` is not absolute.
+- Review and edit `a1.env` before the first real service start.
+- The installer overwrites `/etc/systemd/system/oci-a1-runner.service` with the rendered unit for the selected root.
+- Unsupported arguments fail fast.
+
 ## Checking runner state
 
 You can inspect the runner with:
@@ -202,6 +279,7 @@ The source is either:
 Run the bundled shell regression test from the repository root:
 
 ```bash
+bash ./tests/install.test.sh ./install.sh
 bash ./tests/launch-a1.test.sh ./launch-a1.sh
 bash ./tests/check-runner.test.sh ./check-runner.sh
 ```
