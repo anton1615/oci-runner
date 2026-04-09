@@ -120,14 +120,60 @@ Key settings in `a1.env`:
 - `BOOT_VOLUME_SIZE_GBS`
 - `BOOT_VOLUME_VPUS_PER_GB`
 - `SUCCESS_SENTINEL`
+- `DISCORD_API_BASE`
 - `DISCORD_BOT_TOKEN`
 - `DISCORD_CHANNEL_ID`
+
+Discord notification settings are optional, but recommended when the runner is
+left retrying unattended for long periods.
 
 Format note:
 
 - `a1.env` is expected to be a simple `KEY=value` file.
 - The launcher only accepts a fixed allowlist of known keys.
 - Do not add shell commands, command substitutions, or arbitrary script content.
+
+## Discord notifications
+
+The runner can send Discord messages for important long-running outcomes. This
+is optional, but recommended when the retry loop runs unattended for long
+periods.
+
+Required settings for message delivery:
+
+- `DISCORD_BOT_TOKEN`
+- `DISCORD_CHANNEL_ID`
+
+Optional setting:
+
+- `DISCORD_API_BASE`
+  Defaults to `https://discord.com/api/v10`.
+
+If either `DISCORD_BOT_TOKEN` or `DISCORD_CHANNEL_ID` is missing, the runner
+skips Discord delivery.
+
+The current runner sends Discord messages for:
+
+- successful launch of a new instance
+- detection of an already existing matching instance
+- unknown non-capacity failures
+
+The current runner does not send Discord messages for:
+
+- capacity or rate-limit failures
+- transient network failures
+
+If the Discord API request fails, the runner logs `discord notification failed`
+and continues running. Notification delivery failure does not stop the runner
+or the retry loop.
+
+Example settings:
+
+```dotenv
+DISCORD_API_BASE='https://discord.com/api/v10'
+DISCORD_BOT_TOKEN='<replace-me>'
+DISCORD_CHANNEL_ID='<replace-me>'
+```
 
 ## Deployment layout and path expectations
 
