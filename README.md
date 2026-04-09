@@ -20,12 +20,16 @@ runner on another machine.
   Sanitized configuration template.
 - `install.sh`
   Minimal Linux installer for `systemd` deployments with root checks and service-user derivation.
+- `verify-install.sh`
+  Local post-install verification helper for deployment layout and service wiring.
 - `tests/launch-a1.test.sh`
   Shell regression test with mocked OCI and Discord behavior.
 - `tests/check-runner.test.sh`
   Shell regression test for helper-script path overrides and log display.
 - `tests/install.test.sh`
   Shell regression test for installer path rendering and config preservation.
+- `tests/verify-install.test.sh`
+  Shell regression test for local install verification behavior and warning handling.
 - `docs/superpowers/specs/2026-04-09-oci-runner-repo-design.md`
   Design document for this extracted repository.
 
@@ -226,6 +230,38 @@ Safety notes:
 - The installer overwrites `/etc/systemd/system/oci-a1-runner.service` with the rendered unit for the selected root.
 - Unsupported arguments fail fast.
 
+## Verify an installation
+
+Use `verify-install.sh` after installation to check local deployment state.
+
+Default root and service:
+
+```bash
+bash ./verify-install.sh
+```
+
+Custom root and service:
+
+```bash
+bash ./verify-install.sh --root /srv/oci-runner --service custom-oci-a1-runner.service
+```
+
+Current verifier scope:
+
+- checks local file layout under the selected root
+- checks required non-empty env keys in `a1.env`
+- checks the effective service configuration, or falls back to the installed
+  unit file content, to confirm the selected root paths
+- checks basic `systemctl is-enabled` and `systemctl is-active` visibility
+- runs the installed `check-runner.sh` helper in a local-only way
+
+Important limits:
+
+- `verify-install.sh` checks local deployment state only
+- it does not call OCI APIs or submit a launch request
+- inactive or disabled services are reported as `[WARN]`, not automatic hard failures
+- blocking local problems are reported as `[FAIL]` and cause a non-zero exit
+
 ## Checking runner state
 
 You can inspect the runner with:
@@ -282,6 +318,7 @@ Run the bundled shell regression test from the repository root:
 bash ./tests/install.test.sh ./install.sh
 bash ./tests/launch-a1.test.sh ./launch-a1.sh
 bash ./tests/check-runner.test.sh ./check-runner.sh
+bash ./tests/verify-install.test.sh ./verify-install.sh
 ```
 
 Expected result:
