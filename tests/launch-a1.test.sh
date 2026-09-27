@@ -72,6 +72,35 @@ assert_not_grep() {
     fail "did not expect pattern [$pattern] in $file"
   fi
 }
+assert_shape_config() {
+  local argv_file="$1"
+  local expected_ocpus="$2"
+  local expected_memory="$3"
+  local arg
+  local shape_config=''
+  local found=0
+
+  assert_file_exists "$argv_file"
+  while IFS= read -r arg; do
+    if ((found)); then
+      shape_config="$arg"
+      break
+    fi
+    if [[ "$arg" == '--shape-config' ]]; then
+      found=1
+    fi
+  done < "$argv_file"
+
+  [[ "$found" -eq 1 && -n "$shape_config" ]] || fail "expected --shape-config in $argv_file"
+  jq -e --argjson expected_ocpus "$expected_ocpus" --argjson expected_memory "$expected_memory" '
+    type == "object" and
+    .ocpus == $expected_ocpus and
+    .memoryInGBs == $expected_memory and
+    (keys | sort) == ["memoryInGBs", "ocpus"]
+  ' <<<"$shape_config" > /dev/null || fail "expected parseable --shape-config JSON with ocpus=$expected_ocpus memoryInGBs=$expected_memory"
+}
+
+
 
 make_mock_oci() {
   local path="$1"
@@ -87,7 +116,7 @@ fi
 if [[ "$*" == *"compute instance list"* ]]; then
   if [[ "${MOCK_EXISTING_INSTANCE:-}" == "1" ]]; then
     cat <<'JSON'
-{"data":[{"id":"ocid1.instance.oc1.ap-tokyo-1.exampleexisting","display-name":"oraclelinux-a1-4c24g","shape":"VM.Standard.A1.Flex","lifecycle-state":"RUNNING","availability-domain":"BuyY:AP-TOKYO-1-AD-1"}]}
+{"data":[{"id":"ocid1.instance.oc1.ap-tokyo-1.exampleexisting","display-name":"oraclelinux-a1-2c12g","shape":"VM.Standard.A1.Flex","lifecycle-state":"RUNNING","availability-domain":"BuyY:AP-TOKYO-1-AD-1"}]}
 JSON
   else
     printf '{"data":[]}'
@@ -115,6 +144,10 @@ if [[ "$*" == *"compute instance launch"* ]]; then
     printf 'launch should not be called when existing instance is present\n' >&2
     exit 9
   fi
+  if [[ -n "${MOCK_LAUNCH_ARGS_FILE:-}" ]]; then
+    printf '%s\n' "$@" > "$MOCK_LAUNCH_ARGS_FILE"
+  fi
+
   if [[ "${MOCK_ERROR_TYPE:-}" == "success" ]]; then
     cat <<'JSON'
 {"data":{"id":"ocid1.instance.oc1.ap-tokyo-1.examplesuccess"}}
@@ -217,15 +250,15 @@ OCI_CLI=$base_dir/mock-oci.sh
 OCI_CLI_PROFILE=DEFAULT
 COMPARTMENT_ID=ocid1.tenancy.oc1..example
 SHAPE=VM.Standard.A1.Flex
-OCPUS=4
-MEMORY_IN_GBS=24
+OCPUS=2
+MEMORY_IN_GBS=12
 BOOT_VOLUME_SIZE_GBS=150
 BOOT_VOLUME_VPUS_PER_GB=120
 SUBNET_ID=ocid1.subnet.oc1.ap-tokyo-1.example
 ASSIGN_PUBLIC_IP=true
 IMAGE_ID=ocid1.image.oc1.ap-tokyo-1.example
 SSH_AUTHORIZED_KEYS_FILE=$base_dir/authorized_keys
-DISPLAY_NAME=oraclelinux-a1-4c24g
+DISPLAY_NAME=oraclelinux-a1-2c12g
 SUCCESS_SENTINEL=$base_dir/success.json
 RETRY_MIN_SECONDS=1
 RETRY_MAX_SECONDS=1
@@ -252,7 +285,7 @@ run_case() {
   make_env_file "$workdir/a1.env" "$workdir"
 
   set +e
-  env MOCK_ERROR_TYPE="$error_type" MOCK_EXISTING_INSTANCE="$([[ "$case_name" == "existing" ]] && printf 1 || printf 0)" MOCK_DISCORD_DIR="$workdir/discord-api/channels/test-channel-id" PATH="$workdir:$PATH" ENV_FILE="$workdir/a1.env" LOG_DIR="$workdir/log" bash "$SCRIPT_PATH" >"$workdir/stdout.log" 2>"$workdir/stderr.log" &
+  env MOCK_ERROR_TYPE="$error_type" MOCK_EXISTING_INSTANCE="$([[ "$case_name" == "existing" ]] && printf 1 || printf 0)" MOCK_DISCORD_DIR="$workdir/discord-api/channels/test-channel-id" MOCK_LAUNCH_ARGS_FILE="$workdir/launch-argv" PATH="$workdir:$PATH" ENV_FILE="$workdir/a1.env" LOG_DIR="$workdir/log" bash "$SCRIPT_PATH" >"$workdir/stdout.log" 2>"$workdir/stderr.log" &
   local script_pid=$!
   if [[ "$case_name" == "existing" ]]; then
     wait_for_pattern "$workdir/log/launch-a1.log" 'existing instance detected' 60 0.1 || true
@@ -322,6 +355,7 @@ run_case() {
     assert_grep 'updating boot volume VPU to 120' "$workdir/log/launch-a1.log"
     assert_file_exists "$workdir/discord-api/channels/test-channel-id/messages"
     assert_grep 'OCI A1 搶到機器了' "$workdir/discord-api/channels/test-channel-id/messages"
+    assert_shape_config "$workdir/launch-argv" 2 12
   elif [[ "$case_name" == "unknown" ]]; then
     assert_file_exists "$workdir/log/noncapacity-errors.log"
     assert_has_match "$workdir/log/noncapacity-*-BuyY_AP-TOKYO-1-AD-1.log"
@@ -332,7 +366,7 @@ run_case() {
     assert_grep 'Unexpected backend failure\.' "$snapshot"
     assert_grep 'non-capacity error follows' "$workdir/log/launch-a1.log"
     assert_grep 'OCI A1 非容量錯誤' "$workdir/discord-api/channels/test-channel-id/messages"
-    assert_grep 'display_name=oraclelinux-a1-4c24g' "$workdir/discord-api/channels/test-channel-id/messages"
+    assert_grep 'display_name=oraclelinux-a1-2c12g' "$workdir/discord-api/channels/test-channel-id/messages"
     assert_grep 'AD=BuyY:AP-TOKYO-1-AD-1' "$workdir/discord-api/channels/test-channel-id/messages"
     assert_grep 'snapshot=' "$workdir/discord-api/channels/test-channel-id/messages"
     assert_grep 'Unexpected backend failure\.' "$workdir/discord-api/channels/test-channel-id/messages"
@@ -380,15 +414,15 @@ OCI_CLI=$workdir/mock-oci.sh
 OCI_CLI_PROFILE=DEFAULT
 COMPARTMENT_ID=ocid1.tenancy.oc1..example
 SHAPE=VM.Standard.A1.Flex
-OCPUS=4
-MEMORY_IN_GBS=24
+OCPUS=2
+MEMORY_IN_GBS=12
 BOOT_VOLUME_SIZE_GBS=150
 BOOT_VOLUME_VPUS_PER_GB=120
 SUBNET_ID=ocid1.subnet.oc1.ap-tokyo-1.example
 ASSIGN_PUBLIC_IP=true
 IMAGE_ID=ocid1.image.oc1.ap-tokyo-1.example
 SSH_AUTHORIZED_KEYS_FILE=$workdir/authorized_keys
-DISPLAY_NAME=oraclelinux-a1-4c24g
+DISPLAY_NAME=oraclelinux-a1-2c12g
 SUCCESS_SENTINEL=$workdir/success.json
 RETRY_MIN_SECONDS=1
 RETRY_MAX_SECONDS=1
