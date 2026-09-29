@@ -113,9 +113,14 @@ first_error_summary() {
   ' "$error_file"
 }
 
+error_is_rate_limit() {
+  local error_file="$1"
+  grep -Eiq 'TooManyRequests' "$error_file"
+}
+
 error_is_capacity() {
   local error_file="$1"
-  grep -Eiq 'Out of host capacity|Out of capacity|OutOfHostCapacity|LimitExceeded|TooManyRequests' "$error_file"
+  grep -Eiq 'Out of host capacity|Out of capacity|OutOfHostCapacity|LimitExceeded' "$error_file"
 }
 
 error_is_transient_network() {
@@ -319,6 +324,8 @@ fi
 log "target shape=$SHAPE ocpus=$OCPUS mem=${MEMORY_IN_GBS}GB boot=${BOOT_VOLUME_SIZE_GBS}GB vpu=${BOOT_VOLUME_VPUS_PER_GB}"
 
 while true; do
+  rate_limited=0
+
   if [ -f "$SUCCESS_SENTINEL" ]; then
     log "success sentinel detected during loop; exiting"
     exit 0
@@ -407,7 +414,10 @@ while true; do
       exit 0
     else
       log "launch failed in AD=$AD"
-      if error_is_capacity "$error_log"; then
+      if error_is_rate_limit "$error_log"; then
+        log "rate limit detected"
+        rate_limited=1
+      elif error_is_capacity "$error_log"; then
         log "capacity or rate-limit error detected"
       elif error_is_transient_network "$error_log"; then
         error_snapshot="$(save_error_snapshot transient "$error_log" "$AD" "$safe_ad")"
@@ -433,5 +443,10 @@ error=${error_summary}"
     fi
   done
 
-  rand_sleep
+  if [ "$rate_limited" -eq 1 ]; then
+    log "sleep 600s before next retry"
+    sleep 600
+  else
+    rand_sleep
+  fi
 done

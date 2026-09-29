@@ -163,6 +163,9 @@ The current runner does not send Discord messages for:
 - capacity or rate-limit failures
 - transient network failures
 
+A `TooManyRequests` response waits 600 seconds before the next launch. Other
+retryable failures keep the configured retry interval.
+
 If the Discord API request fails, the runner logs `discord notification failed`
 and continues running. Notification delivery failure does not stop the runner
 or the retry loop.

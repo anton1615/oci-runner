@@ -116,7 +116,7 @@ fi
 if [[ "$*" == *"compute instance list"* ]]; then
   if [[ "${MOCK_EXISTING_INSTANCE:-}" == "1" ]]; then
     cat <<'JSON'
-{"data":[{"id":"ocid1.instance.oc1.ap-tokyo-1.exampleexisting","display-name":"oraclelinux-a1-2c12g","shape":"VM.Standard.A1.Flex","lifecycle-state":"RUNNING","availability-domain":"BuyY:AP-TOKYO-1-AD-1"}]}
+{"data":[{"id":"ocid1.instance.oc1.ap-tokyo-1.exampleexisting","display-name":"oraclelinux-a1-1c6g","shape":"VM.Standard.A1.Flex","lifecycle-state":"RUNNING","availability-domain":"BuyY:AP-TOKYO-1-AD-1"}]}
 JSON
   else
     printf '{"data":[]}'
@@ -250,15 +250,15 @@ OCI_CLI=$base_dir/mock-oci.sh
 OCI_CLI_PROFILE=DEFAULT
 COMPARTMENT_ID=ocid1.tenancy.oc1..example
 SHAPE=VM.Standard.A1.Flex
-OCPUS=2
-MEMORY_IN_GBS=12
+OCPUS=1
+MEMORY_IN_GBS=6
 BOOT_VOLUME_SIZE_GBS=150
 BOOT_VOLUME_VPUS_PER_GB=120
 SUBNET_ID=ocid1.subnet.oc1.ap-tokyo-1.example
 ASSIGN_PUBLIC_IP=true
 IMAGE_ID=ocid1.image.oc1.ap-tokyo-1.example
 SSH_AUTHORIZED_KEYS_FILE=$base_dir/authorized_keys
-DISPLAY_NAME=oraclelinux-a1-2c12g
+DISPLAY_NAME=oraclelinux-a1-1c6g
 SUCCESS_SENTINEL=$base_dir/success.json
 RETRY_MIN_SECONDS=1
 RETRY_MAX_SECONDS=1
@@ -297,6 +297,8 @@ run_case() {
   elif [[ "$case_name" == "unknown" ]]; then
     wait_for_pattern "$workdir/log/launch-a1.log" 'saved non-capacity error snapshot' 60 0.1 || true
     wait_for_file "$workdir/discord-api/channels/test-channel-id/messages" 60 0.1 || true
+  elif [[ "$case_name" == "rate_limit" ]]; then
+    wait_for_pattern "$workdir/log/launch-a1.log" 'sleep 600s before next retry' 60 0.1 || true
   elif [[ "$case_name" == "transient" || "$case_name" == "transient_endpoint" ]]; then
     wait_for_pattern "$workdir/log/launch-a1.log" 'saved transient error snapshot' 60 0.1 || true
   else
@@ -355,7 +357,7 @@ run_case() {
     assert_grep 'updating boot volume VPU to 120' "$workdir/log/launch-a1.log"
     assert_file_exists "$workdir/discord-api/channels/test-channel-id/messages"
     assert_grep 'OCI A1 搶到機器了' "$workdir/discord-api/channels/test-channel-id/messages"
-    assert_shape_config "$workdir/launch-argv" 2 12
+    assert_shape_config "$workdir/launch-argv" 1 6
   elif [[ "$case_name" == "unknown" ]]; then
     assert_file_exists "$workdir/log/noncapacity-errors.log"
     assert_has_match "$workdir/log/noncapacity-*-BuyY_AP-TOKYO-1-AD-1.log"
@@ -366,7 +368,7 @@ run_case() {
     assert_grep 'Unexpected backend failure\.' "$snapshot"
     assert_grep 'non-capacity error follows' "$workdir/log/launch-a1.log"
     assert_grep 'OCI A1 非容量錯誤' "$workdir/discord-api/channels/test-channel-id/messages"
-    assert_grep 'display_name=oraclelinux-a1-2c12g' "$workdir/discord-api/channels/test-channel-id/messages"
+    assert_grep 'display_name=oraclelinux-a1-1c6g' "$workdir/discord-api/channels/test-channel-id/messages"
     assert_grep 'AD=BuyY:AP-TOKYO-1-AD-1' "$workdir/discord-api/channels/test-channel-id/messages"
     assert_grep 'snapshot=' "$workdir/discord-api/channels/test-channel-id/messages"
     assert_grep 'Unexpected backend failure\.' "$workdir/discord-api/channels/test-channel-id/messages"
@@ -386,6 +388,17 @@ run_case() {
     assert_not_grep 'non-capacity error follows' "$workdir/log/launch-a1.log"
     [ ! -f "$workdir/log/noncapacity-errors.log" ] || fail 'did not expect noncapacity-errors.log for transient case'
     [ ! -f "$workdir/discord-api/channels/test-channel-id/messages" ] || fail 'did not expect discord message for transient case'
+  elif [[ "$case_name" == "rate_limit" ]]; then
+    assert_no_match "$workdir/log/noncapacity-*-BuyY_AP-TOKYO-1-AD-1.log"
+    [ ! -f "$workdir/log/noncapacity-errors.log" ] || fail 'did not expect noncapacity-errors.log for rate-limit case'
+    assert_no_match "$workdir/log/transient-*-BuyY_AP-TOKYO-1-AD-1.log"
+    [ ! -f "$workdir/log/transient-errors.log" ] || fail 'did not expect transient-errors.log for rate-limit case'
+    assert_grep 'rate limit detected' "$workdir/log/launch-a1.log"
+    assert_grep 'sleep 600s before next retry' "$workdir/log/launch-a1.log"
+    assert_not_grep 'capacity or rate-limit error detected' "$workdir/log/launch-a1.log"
+    assert_not_grep 'sleep 1s before next retry' "$workdir/log/launch-a1.log"
+    assert_not_grep 'non-capacity error follows' "$workdir/log/launch-a1.log"
+    [ ! -f "$workdir/discord-api/channels/test-channel-id/messages" ] || fail 'did not expect discord message for rate-limit case'
   else
     assert_no_match "$workdir/log/noncapacity-*-BuyY_AP-TOKYO-1-AD-1.log"
     [ ! -f "$workdir/log/noncapacity-errors.log" ] || fail 'did not expect noncapacity-errors.log for capacity case'
@@ -395,8 +408,8 @@ run_case() {
     assert_not_grep 'non-capacity error follows' "$workdir/log/launch-a1.log"
     [ ! -f "$workdir/discord-api/channels/test-channel-id/messages" ] || fail 'did not expect discord message for capacity case'
   fi
-
   trap - RETURN
+
   rm -rf "$workdir"
 }
 
@@ -455,7 +468,7 @@ run_case launch_success success
 run_case unknown unknown
 run_case transient transient
 run_case transient_endpoint transient_endpoint
-run_case capacity rate_limit
+run_case rate_limit rate_limit
 run_case capacity capacity
 run_invalid_env_case
 
